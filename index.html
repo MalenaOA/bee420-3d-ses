@@ -279,7 +279,8 @@ function stateFromCSV(text) {
         { errors.push(`Line ${line}: cut points of "${g('name')}" must lie in 0 to 1 with min below max.`); return; }
       s.axes[ax].push({ cat: g('group') || '(no category)', name: g('name'), value });
     } else if (rec === 'alt') {
-      const code = g('group') || 'Alt';
+      const code = g('group');
+      if (!code) { errors.push(`Line ${line}: the alternative has no code (column group). Give each alternative a unique code.`); return; }
       if (!altMap.has(code)) altMap.set(code, { code, label: g('label') || code, box: {}, targets: { X: [], Y: [], Z: [] }, scores: {} });
       const a = altMap.get(code);
       if (ax === 'L') { a.scores.L = num('value'); return; }
@@ -288,6 +289,7 @@ function stateFromCSV(text) {
       if (!(Number.isFinite(mn) && Number.isFinite(mx))) { errors.push(`Line ${line}: ${code} ${ax} needs numeric min and max.`); return; }
       if (mn < -EPS || mx > 1 + 1e-6) { errors.push(`Line ${line}: ${code} ${ax} bounds [${mn}, ${mx}] are outside 0 to 1.`); return; }
       if (!(mx > mn)) { errors.push(`Line ${line}: ${code} ${ax} min (${mn}) must be smaller than max (${mx}).`); return; }
+      if (a.box[ax]) { errors.push(`Line ${line}: code ${code} has two ${ax} rows. Give each alternative a unique code.`); return; }
       a.box[ax] = [Math.max(0, mn), Math.min(1, mx)];
       a.targets[ax] = g('name').split(';').map(t => t.trim()).filter(Boolean);
       const v = num('value'); if (Number.isFinite(v)) a.scores[ax] = v;
@@ -566,7 +568,8 @@ function renderOverlaps() {
   if (!pairs.length) { el.textContent = 'Fewer than two alternatives.'; return; }
   el.innerHTML = pairs.map(p => {
     const a = state.alts[p.i], b = state.alts[p.j];
-    return `<div style="margin:6px 0"><b>${esc(a.code)} ∩ ${esc(b.code)}</b>${p.box ? boxHTML(p.box) : '<div>No overlap: the boxes are disjoint on at least one axis.</div>'}</div>`;
+    const shared = AXES.reduce((n, ax) => n + a.targets[ax].filter(t => b.targets[ax].includes(t)).length, 0);
+    return `<div style="margin:6px 0"><b>${esc(a.code)} ∩ ${esc(b.code)}</b> <span>(${shared} shared target${shared === 1 ? '' : 's'})</span>${p.box ? boxHTML(p.box) : '<div>No overlap: the boxes are disjoint on at least one axis.</div>'}</div>`;
   }).join('');
 }
 function updateNames() { for (let i = 0; i < 3; i++) { const A = state.alts[i]; document.getElementById('n' + i).innerHTML = A && !A.empty ? `<span style="color:${ALT_COLORS[i]}">■</span> ${esc(A.code)}: ${esc(A.label)}` : `Cube ${i + 1} (empty)`; } }
