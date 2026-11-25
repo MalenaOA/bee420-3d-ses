@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D SES Viewer</title>
+<meta name="description" content="BEE 420/520 Ecological Systems Analysis: 3D socio-ecological system built from FEGS Scoping Tool results, with design alternatives as boxes.">
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1d232b; --muted:#5b6673; --line:#d7dce2; --accent:#d73f09; --accent-ink:#ffffff;
+  --err-bg:#fdecea; --err-ink:#a1260d; --ok-bg:#e8f5e9; --ok-ink:#1e6b2a; --scene:#fbfbfc; --chip:#eef1f4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14171b; --panel:#1c2026; --ink:#e7eaee; --muted:#9aa5b1; --line:#2d333b; --accent:#ff7a45; --accent-ink:#111;
+    --err-bg:#3a1d18; --err-ink:#ffb4a3; --ok-bg:#16301b; --ok-ink:#a6e3b0; --scene:#101317; --chip:#262b33;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14171b; --panel:#1c2026; --ink:#e7eaee; --muted:#9aa5b1; --line:#2d333b; --accent:#ff7a45; --accent-ink:#111;
+  --err-bg:#3a1d18; --err-ink:#ffb4a3; --ok-bg:#16301b; --ok-ink:#a6e3b0; --scene:#101317; --chip:#262b33;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{display:grid;grid-template-columns:380px 1fr 320px;height:100vh}
+#left,#right{background:var(--panel);overflow:auto;border-right:1px solid var(--line);padding:14px}
+#right{border-right:none;border-left:1px solid var(--line)}
+#stage{position:relative;min-height:360px;background:var(--scene)}
+#canvasWrap{position:absolute;inset:0}
+h1{font-size:17px;margin:0 0 4px}
+h2{font-size:14px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+p.small,.small{font-size:12px;color:var(--muted)}
+button,.btn{font:inherit;padding:6px 10px;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:6px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+label.toggle{display:flex;gap:6px;align-items:center;margin:3px 0}
+input[type=number],input[type=text],select{font:inherit;padding:3px 5px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);min-width:0}
+input.bad{border-color:var(--err-ink);background:var(--err-bg)}
+details{border:1px solid var(--line);border-radius:6px;margin:6px 0;padding:4px 8px}
+summary{cursor:pointer;font-weight:600}
+table.ax{width:100%;border-collapse:collapse;font-size:12px}
+table.ax td,table.ax th{border-bottom:1px solid var(--line);padding:2px 3px;text-align:left}
+table.ax input{width:100%}
+table.ax td.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.alt{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:6px;padding:8px;margin:8px 0}
+.alt .grid{display:grid;grid-template-columns:28px 1fr 1fr;gap:4px;align-items:center}
+.alt select[multiple]{width:100%;height:76px;font-size:12px}
+#msgs div{padding:6px 8px;border-radius:5px;margin:4px 0;font-size:12px}
+#msgs .err{background:var(--err-bg);color:var(--err-ink)}
+#msgs .ok{background:var(--ok-bg);color:var(--ok-ink)}
+#tooltip{position:absolute;pointer-events:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;max-width:280px;box-shadow:0 2px 8px rgba(0,0,0,.2);display:none;z-index:5}
+#toolbar{position:absolute;top:8px;left:8px;display:flex;gap:6px;z-index:4;flex-wrap:wrap}
+.lbl{font:11px system-ui,sans-serif;color:var(--ink);background:color-mix(in srgb,var(--panel) 75%,transparent);padding:0 3px;border-radius:3px;white-space:nowrap}
+.lbl.axis{font-weight:700;font-size:13px}
+.lbl.cat{color:var(--muted);font-size:10px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:12px}
+.kv b{font-weight:600}
+.legend span{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:4px;vertical-align:-2px}
+.mono{font-variant-numeric:tabular-nums}
+@media (max-width:1100px){
+  #app{grid-template-columns:1fr;grid-template-rows:auto 60vh auto;height:auto}
+  #left,#right{border:none;border-bottom:1px solid var(--line)}
+  #stage{height:60vh}
+}
+@media (max-width:480px){ #left,#right{padding:12px 16px} }
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="left">
+    <h1>3D socio-ecological system</h1>
+    <p class="small">BEE 420/520 Ecological Systems Analysis. X = stakeholder groups, Y = beneficiary subcategories, Z = environmental attributes, each scaled 0 to 1 by its share of the FEGS Scoping Tool result. Boxes = design alternatives.</p>
+    <div class="row">
+      <label class="btn" for="file">Upload CSV</label>
+      <input id="file" type="file" accept=".csv,text/csv" hidden>
+      <button id="loadExample">Tillamook example</button>
+      <button id="dlCsv">Download CSV</button>
+      <button id="dlTpl">Blank template</button>
+    </div>
+    <div id="msgs" aria-live="polite"></div>
+
+    <h2>Axes (FST results)</h2>
+    <p class="small">One row per item, in axis order. Result must be 0 or more. Share and cut points [min, max] are recalculated.</p>
+    <div id="axesForm"></div>
+
+    <h2>Alternatives (boxes)</h2>
+    <p class="small">Bounds are shares of the axis (0 to 1); min must be smaller than max. Pick targets and press "Fit to targets" to set the bounds from their cut points.</p>
+    <div id="altsForm"></div>
+    <div class="row"><button class="primary" id="apply">Apply to 3D</button></div>
+  </aside>
+
+  <main id="stage">
+    <div id="toolbar"><button id="resetCam">Reset camera</button>
+      <select id="gridLevel" aria-label="Grid level"><option value="cat">Grid: categories</option><option value="item">Grid: items</option></select>
+    </div>
+    <div id="canvasWrap"></div>
+    <div id="tooltip"></div>
+  </main>
+
+  <aside id="right">
+    <h2 style="margin-top:0">Show</h2>
+    <label class="toggle"><input type="checkbox" id="tGrid" checked> Background grid cells</label>
+    <label class="toggle"><input type="checkbox" id="tOuter" checked> Outer cube wireframe</label>
+    <label class="toggle"><input type="checkbox" id="tC0" checked> <span id="n0">Cube 1</span></label>
+    <label class="toggle"><input type="checkbox" id="tC1" checked> <span id="n1">Cube 2</span></label>
+    <label class="toggle"><input type="checkbox" id="tC2" checked> <span id="n2">Cube 3</span></label>
+    <label class="toggle"><input type="checkbox" id="tInt" checked> Intersection highlight</label>
+    <label class="toggle"><input type="checkbox" id="tLbl" checked> Category labels</label>
+
+    <h2>Inspector</h2>
+    <p class="small" id="pinNote">Hover to preview. Click a cube or grid cell to pin it; click empty space to unpin.</p>
+    <div id="inspector" class="small">Nothing selected.</div>
+
+    <h2>Find a grid cell</h2>
+    <div class="small">Interior cells are hidden behind outer ones; pick them here.</div>
+    <div class="row"><select id="fX" aria-label="X item"></select></div>
+    <div class="row"><select id="fY" aria-label="Y item"></select></div>
+    <div class="row"><select id="fZ" aria-label="Z item"></select></div>
+    <div class="row"><button id="findCell">Select cell</button></div>
+
+    <h2>Overlaps</h2>
+    <div id="overlaps" class="small"></div>
+  </aside>
+</div>
+
+<script type="text/plain" id="sampleCsv">record,axis,group,name,value,min,max,label
+axis,X,Tier 1,County Agencies,86.48,0,0.09336673,
+axis,X,Tier 1,Tillamook Shooters Association,80.8,0.09336673,0.18060114,
+axis,X,Tier 1,Rural Resident Neighbors,78.4,0.18060114,0.265244429,
+axis,X,Tier 1,NCLC Site Landowners,76.32,0.265244429,0.34764208,
+axis,X,Tier 1,TEP & Partners,73.52,0.34764208,0.427016756,
+axis,X,Tier 2,Industrial Timber Neighbors,66.48,0.427016756,0.49879081,
+axis,X,Tier 2,Industrial Dairy Neighbors,60.32,0.49879081,0.56391432,
+axis,X,Tier 2,Funders,60.16,0.56391432,0.628865089,
+axis,X,Tier 2,Commuters,59.2,0.628865089,0.692779409,
+axis,X,Tier 2,State Agencies,58.56,0.692779409,0.756002764,
+axis,X,Tier 2,Federal Agencies,58.56,0.756002764,0.819226119,
+axis,X,Tier 3,Dairy Community,51.68,0.819226119,0.875021593,
+axis,X,Tier 3,Utilities,41.76,0.875021593,0.9201071,
+axis,X,Tier 3,Commercial Community,40.8,0.9201071,0.964156158,
+axis,X,Tier 3,General Public,33.2,0.964156158,1,
+axis,Y,Non-Use,People Who Care,21.5456901,0,0.225629522,
+axis,Y,Transportation,Transporters of People,10.085507,0.225629522,0.331246382,
+axis,Y,Transportation,Transporters of Goods,7.99749525,0.331246382,0.414997287,
+axis,Y,Learning,Students and Educators,8.182155813,0.414997287,0.500681983,
+axis,Y,Learning,Researchers,7.958023838,0.500681983,0.584019537,
+axis,Y,Recreational,Experiencers/Viewers,5.171359475,0.584019537,0.638174747,
+axis,Y,Recreational,Hunters,4.153048886,0.638174747,0.681666064,
+axis,Y,Recreational,Anglers,3.019001555,0.681666064,0.713281476,
+axis,Y,Recreational,Food Pickers/Gatherers,1.474434272,0.713281476,0.728721961,
+axis,Y,Recreational,Boaters,1.143375367,0.728721961,0.74069555,
+axis,Y,Government/Municipal/Residential,Public Sector Property Owners,4.6683365,0.74069555,0.789583032,
+axis,Y,Government/Municipal/Residential,Residential Property Owners,3.38573156,0.789583032,0.825038893,
+axis,Y,Agricultural,Livestock Grazers,1.797374331,0.825038893,0.843861252,
+axis,Y,Agricultural,Foresters,1.794351356,0.843861252,0.862651954,
+axis,Y,Agricultural,Farmers,1.628087753,0.862651954,0.87970152,
+axis,Y,Agricultural,Aquaculturalists,1.321471757,0.87970152,0.893540159,
+axis,Y,Commercial/Industrial,Commercial Property Owners,3.422439109,0.893540159,0.929380427,
+axis,Y,Commercial/Industrial,Timber/Fiber/Ornamental Extractors,1.794351356,0.929380427,0.948171129,
+axis,Y,Subsistence,Water Subsisters,3.105890482,0.948171129,0.980696454,
+axis,Y,Inspirational,Spiritual and Ceremonial Participants,1.006305061,0.980696454,0.991234624,
+axis,Y,Inspirational,Artists,0.837018483,0.991234624,1,
+axis,Z,Composite (and Extreme Events),Flooding,30.74679721,0,0.307467972,
+axis,Z,Composite (and Extreme Events),Ecological Condition,7.351456223,0.307467972,0.380982534,
+axis,Z,Composite (and Extreme Events),Viewscapes,4.700019899,0.380982534,0.427982733,
+axis,Z,Composite (and Extreme Events),Open Space,4.269706946,0.427982733,0.470679803,
+axis,Z,Composite (and Extreme Events),Earthquakes,2.212553365,0.470679803,0.492805336,
+axis,Z,Composite (and Extreme Events),Sounds,1.058903763,0.492805336,0.503394374,
+axis,Z,Composite (and Extreme Events),Phenomena,0.893804269,0.503394374,0.512332417,
+axis,Z,Composite (and Extreme Events),Scents,0.770596961,0.512332417,0.520038386,
+axis,Z,Composite (and Extreme Events),Wildfire,0.257054088,0.520038386,0.522608927,
+axis,Z,Composite (and Extreme Events),Extreme Weather Events,0.257054088,0.522608927,0.525179468,
+axis,Z,Fauna,Edible Fauna,7.887753256,0.525179468,0.604057001,
+axis,Z,Fauna,Fauna Community,4.083312229,0.604057001,0.644890123,
+axis,Z,Fauna,Rare Fauna,2.746722142,0.644890123,0.672357344,
+axis,Z,Fauna,Keystone Fauna,2.638411722,0.672357344,0.698741462,
+axis,Z,Fauna,Charismatic Fauna,2.481582851,0.698741462,0.72355729,
+axis,Z,Fauna,Commercially Important Fauna,1.128147612,0.72355729,0.734838766,
+axis,Z,Fauna,Spiritually/Culturally Important Fauna,0.637092077,0.734838766,0.741209687,
+axis,Z,Fauna,Medicinal Fauna,0.010538169,0.741209687,0.741315069,
+axis,Z,Water,Water Quality,5.53449801,0.741315069,0.796660049,
+axis,Z,Water,Water Quantity,3.549335203,0.796660049,0.832153401,
+axis,Z,Water,Water Movement,2.632925109,0.832153401,0.858482652,
+axis,Z,Flora,Flora Community,3.473312229,0.858482652,0.893215774,
+axis,Z,Flora,Rare Flora,1.765665702,0.893215774,0.910872431,
+axis,Z,Flora,Keystone Flora,1.711510492,0.910872431,0.927987536,
+axis,Z,Flora,Spiritually/Culturally Important Flora,0.637092077,0.927987536,0.934358457,
+axis,Z,Flora,Charismatic Flora,0.58440123,0.934358457,0.940202469,
+axis,Z,Flora,Medicinal Flora,0.273759949,0.940202469,0.942940069,
+axis,Z,Flora,Edible Flora,0.231607272,0.942940069,0.945256141,
+axis,Z,Soil,Soil Quality,1.300484805,0.945256141,0.95826099,
+axis,Z,Soil,Substrate Quality,1.282214182,0.95826099,0.971083131,
+axis,Z,Soil,Substrate Quantity,0.322720695,0.971083131,0.974310338,
+axis,Z,Fungi,Fungal Community,0.478560058,0.974310338,0.979095939,
+axis,Z,Fungi,Medicinal Fungi,0.284298119,0.979095939,0.98193892,
+axis,Z,Fungi,Edible Fungi,0.231607272,0.98193892,0.984254993,
+axis,Z,Fungi,Spiritually/Culturally Important Fungi,0.185833032,0.984254993,0.986113323,
+axis,Z,Fungi,Rare Fungi,0.05415521,0.986113323,0.986654875,
+axis,Z,Atmosphere,Air Quality,0.464856187,0.986654875,0.991303437,
+axis,Z,Atmosphere,Wind Strength/Speed,0.23947178,0.991303437,0.993698155,
+axis,Z,Atmosphere,Sunlight,0.057910637,0.993698155,0.994277261,
+axis,Z,Other Natural Components,Presence of Other Natural Materials for Artistic Use or Consumption,0.220041606,0.994277261,0.996477677,
+axis,Z,Other Natural Components,Fiber Material Quality,0.16735076,0.996477677,0.998151185,
+axis,Z,Other Natural Components,Fiber Material Quantity,0.16735076,0.998151185,0.999824692,
+axis,Z,Other Natural Components,Mineral/Chemical Quality,0.008765376,0.999824692,0.999912346,
+axis,Z,Other Natural Components,Mineral/Chemical Quantity,0.008765376,0.999912346,1,
+alt,X,FRLA,County Agencies; Rural Resident Neighbors; Commuters,0.241924339,0,0.692779409,Flood-Resilient Local Access
+alt,Y,FRLA,Transporters of People; Transporters of Goods; Residential Property Owners,0.213123191,0.225629522,0.825038893,Flood-Resilient Local Access
+alt,Z,FRLA,Flooding; Water Movement; Water Quality,0.334420468,0,0.858482652,Flood-Resilient Local Access
+alt,X,BWR,TEP & Partners; NCLC Site Landowners; Funders,0.205289342,0.265244429,0.628865089,Biodiversity-focused Tidal Wetland Restoration
+alt,Y,BWR,People Who Care; Researchers; Anglers,0.30264801,0,0.713281476,Biodiversity-focused Tidal Wetland Restoration
+alt,Z,BWR,Edible Fauna; Ecological Condition; Fauna Community,0.193225217,0.307467972,0.644890123,Biodiversity-focused Tidal Wetland Restoration
+alt,X,E&RH,TEP & Partners; Tillamook Shooters Association; County Agencies,0.142439109,0,0.427016756,Education and Recreation Hybrid Restoration
+alt,Y,E&RH,Students and Educators; Experiencers/Viewers; People Who Care,0.214297648,0,0.638174747,Education and Recreation Hybrid Restoration
+alt,Z,E&RH,Viewscapes; Open Space; Flooding,0.177071666,0,0.470679803,Education and Recreation Hybrid Restoration
+alt,L,FRLA,SES linkage,0.0918463,0,0,Flood-Resilient Local Access
+alt,L,BWR,SES linkage,0.027218115,0,0,Biodiversity-focused Tidal Wetland Restoration
+alt,L,E&RH,SES linkage,0.020123834,0,0,Education and Recreation Hybrid Restoration</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const SIDE = 5, HALF = SIDE / 2;
+const AXES = ['X', 'Y', 'Z'];
+const AXIS_NAME = { X: 'X  Stakeholder groups', Y: 'Y  Beneficiaries', Z: 'Z  Environmental attributes' };
+const ALT_COLORS = ['#e8112d', '#0072ce', '#00a651'];
+const INT_COLOR = '#ffb000';
+const EPS = 1e-9;
+
+// ---------------- state ----------------
+let state = { axes: { X: [], Y: [], Z: [] }, alts: [] };
+
+// ---------------- CSV ----------------
+function parseCSV(text) {
+  text = text.replace(/^﻿/, '');
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(f); rows.push(row); row = []; f = '';
+    } else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim() !== ''));
+}
+function csvCell(v) { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+
+function stateFromCSV(text) {
+  const rows = parseCSV(text), errors = [], warnings = [];
+  if (!rows.length) return { errors: ['The file is empty.'] };
+  const head = rows[0].map(h => h.trim().toLowerCase());
+  const need = ['record', 'axis', 'group', 'name', 'value', 'min', 'max', 'label'];
+  const idx = {}; for (const n of need) idx[n] = head.indexOf(n);
+  const missing = need.filter(n => idx[n] < 0 && n !== 'label');
+  if (missing.length) return { errors: ['Missing column(s): ' + missing.join(', ') + '. Export the 3D_CSV sheet of the workbook.'] };
+  const s = { axes: { X: [], Y: [], Z: [] }, alts: [] }; const altMap = new Map();
+  rows.slice(1).forEach((r, k) => {
+    const line = k + 2, g = n => (idx[n] >= 0 ? (r[idx[n]] ?? '') : '').trim();
+    const rec = g('record').toLowerCase(), ax = g('axis').toUpperCase();
+    const num = n => { const v = g(n); return v === '' ? NaN : Number(v); };
+    if (rec === 'axis') {
+      if (!AXES.includes(ax)) { errors.push(`Line ${line}: axis must be X, Y or Z.`); return; }
+      const value = num('value');
+      if (!Number.isFinite(value) || value < 0) { errors.push(`Line ${line}: result of "${g('name')}" must be a number of 0 or more.`); return; }
+      const mn = num('min'), mx = num('max');
+      if (Number.isFinite(mn) && Number.isFinite(mx) && (mn < -EPS || mx > 1 + 1e-6 || mn > mx + EPS))
+        { errors.push(`Line ${line}: cut points of "${g('name')}" must lie in 0 to 1 with min below max.`); return; }
+      s.axes[ax].push({ cat: g('group') || '(no category)', name: g('name'), value });
+    } else if (rec === 'alt') {
+      const code = g('group') || 'Alt';
+      if (!altMap.has(code)) altMap.set(code, { code, label: g('label') || code, box: {}, targets: { X: [], Y: [], Z: [] }, scores: {} });
+      const a = altMap.get(code);
+      if (ax === 'L') { a.scores.L = num('value'); return; }
+      if (!AXES.includes(ax)) { errors.push(`Line ${line}: axis must be X, Y, Z or L.`); return; }
+      const mn = num('min'), mx = num('max');
+      if (!(Number.isFinite(mn) && Number.isFinite(mx))) { errors.push(`Line ${line}: ${code} ${ax} needs numeric min and max.`); return; }
+      if (mn < -EPS || mx > 1 + 1e-6) { errors.push(`Line ${line}: ${code} ${ax} bounds [${mn}, ${mx}] are outside 0 to 1.`); return; }
+      if (!(mx > mn)) { errors.push(`Line ${line}: ${code} ${ax} min (${mn}) must be smaller than max (${mx}).`); return; }
+      a.box[ax] = [Math.max(0, mn), Math.min(1, mx)];
+      a.targets[ax] = g('name').split(';').map(t => t.trim()).filter(Boolean);
+      const v = num('value'); if (Number.isFinite(v)) a.scores[ax] = v;
+    } else if (rec !== '') warnings.push(`Line ${line}: unknown record "${g('record')}" ignored.`);
+  });
+  for (const ax of AXES) if (!s.axes[ax].length) errors.push(`No rows for the ${ax} axis.`);
+  s.alts = [...altMap.values()];
+  for (const a of s.alts) for (const ax of AXES) if (!a.box[ax]) errors.push(`${a.code}: no ${ax} bounds.`);
+  if (s.alts.length > 3) { warnings.push(`Only the first 3 of ${s.alts.length} alternatives are shown.`); s.alts = s.alts.slice(0, 3); }
+  return { state: s, errors, warnings };
+}
+
+function stateToCSV(s) {
+  const lines = [['record', 'axis', 'group', 'name', 'value', 'min', 'max', 'label'].join(',')];
+  for (const ax of AXES) for (const it of cuts(s.axes[ax]))
+    lines.push(['axis', ax, it.cat, it.name, it.value, it.min.toFixed(8), it.max.toFixed(8), ''].map(csvCell).join(','));
+  for (const a of s.alts) {
+    for (const ax of AXES) lines.push(['alt', ax, a.code, a.targets[ax].join('; '), a.scores[ax] ?? '', a.box[ax][0], a.box[ax][1], a.label].map(csvCell).join(','));
+    if (a.scores.L !== undefined) lines.push(['alt', 'L', a.code, 'SES linkage', a.scores.L, '', '', a.label].map(csvCell).join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+// cut points from results, in listed order
+function cuts(items) {
+  const tot = items.reduce((t, i) => t + (Number(i.value) || 0), 0);
+  let c = 0;
+  return items.map(i => { const sh = tot > 0 ? (Number(i.value) || 0) / tot : 0; const o = { ...i, share: sh, min: c, max: c + sh }; c += sh; return o; });
+}
+function catCuts(items) {
+  const out = [];
+  for (const it of cuts(items)) {
+    const last = out[out.length - 1];
+    if (last && last.cat === it.cat) { last.max = it.max; last.share += it.share; last.n++; }
+    else out.push({ cat: it.cat, min: it.min, max: it.max, share: it.share, n: 1 });
+  }
+  return out;
+}
+
+// ---------------- messages ----------------
+const msgs = document.getElementById('msgs');
+function say(list, cls) { for (const m of list) { const d = document.createElement('div'); d.className = cls; d.textContent = m; msgs.appendChild(d); } }
+function clearMsgs() { msgs.innerHTML = ''; }
+
+// ---------------- forms ----------------
+const axesForm = document.getElementById('axesForm'), altsForm = document.getElementById('altsForm');
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+function renderAxesForm() {
+  axesForm.innerHTML = '';
+  for (const ax of AXES) {
+    const det = document.createElement('details'); if (ax === 'X') det.open = false;
+    const its = cuts(state.axes[ax]);
+    det.innerHTML = `<summary>${AXIS_NAME[ax]} (${its.length} items)</summary>
+      <table class="ax"><thead><tr><th>Category</th><th>Item</th><th>Result</th><th>[min, max]</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="row"><button type="button" data-add="${ax}">Add row</button></div>`;
+    const tb = det.querySelector('tbody');
+    its.forEach((it, k) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><input type="text" data-ax="${ax}" data-k="${k}" data-f="cat" value="${esc(it.cat)}"></td>
+        <td><input type="text" data-ax="${ax}" data-k="${k}" data-f="name" value="${esc(it.name)}"></td>
+        <td><input type="number" min="0" step="any" data-ax="${ax}" data-k="${k}" data-f="value" value="${it.value}" style="width:70px"></td>
+        <td class="num">[${it.min.toFixed(3)}, ${it.max.toFixed(3)}]</td>
+        <td><button type="button" title="Delete row" aria-label="Delete row" data-del="${ax}" data-k="${k}">×</button></td>`;
+      tb.appendChild(tr);
+    });
+    axesForm.appendChild(det);
+  }
+}
+axesForm.addEventListener('input', e => {
+  const t = e.target; if (!t.dataset.ax) return;
+  const it = state.axes[t.dataset.ax][+t.dataset.k];
+  if (t.dataset.f === 'value') {
+    const v = Number(t.value); const bad = t.value === '' || !Number.isFinite(v) || v < 0;
+    t.classList.toggle('bad', bad); t.title = bad ? 'Result must be a number of 0 or more.' : '';
+    if (!bad) it.value = v;
+  } else it[t.dataset.f] = t.value;
+});
+axesForm.addEventListener('click', e => {
+  const t = e.target;
+  if (t.dataset.add) { state.axes[t.dataset.add].push({ cat: '(new)', name: 'New item', value: 0 }); renderAxesForm(); openAxis(t.dataset.add); renderAltsForm(); }
+  if (t.dataset.del) { state.axes[t.dataset.del].splice(+t.dataset.k, 1); renderAxesForm(); openAxis(t.dataset.del); renderAltsForm(); }
+});
+function openAxis(ax) { axesForm.querySelectorAll('details')[AXES.indexOf(ax)].open = true; }
+
+function renderAltsForm() {
+  altsForm.innerHTML = '';
+  for (let a = 0; a < 3; a++) {
+    if (!state.alts[a]) state.alts[a] = { code: `A${a + 1}`, label: `Alternative ${a + 1}`, box: { X: [0, 0.2], Y: [0, 0.2], Z: [0, 0.2] }, targets: { X: [], Y: [], Z: [] }, scores: {}, empty: true };
+    const A = state.alts[a];
+    const div = document.createElement('div'); div.className = 'alt'; div.style.setProperty('--c', ALT_COLORS[a]);
+    let html = `<div class="row"><b>Cube ${a + 1}</b>
+      <input type="text" aria-label="Code" data-a="${a}" data-f="code" value="${esc(A.code)}" style="width:70px">
+      <input type="text" aria-label="Name" data-a="${a}" data-f="label" value="${esc(A.label)}" style="flex:1"></div>
+      <div class="grid"><span></span><span class="small">min</span><span class="small">max</span>`;
+    for (const ax of AXES) html += `<b>${ax}</b>
+      <input type="number" min="0" max="1" step="0.0001" aria-label="${ax} min" data-a="${a}" data-ax="${ax}" data-i="0" value="${+A.box[ax][0].toFixed(6)}">
+      <input type="number" min="0" max="1" step="0.0001" aria-label="${ax} max" data-a="${a}" data-ax="${ax}" data-i="1" value="${+A.box[ax][1].toFixed(6)}">`;
+    html += `</div><details><summary>Targets</summary>`;
+    for (const ax of AXES) {
+      html += `<div class="small">${AXIS_NAME[ax]}</div><select multiple data-a="${a}" data-tax="${ax}" aria-label="${ax} targets">`;
+      for (const it of state.axes[ax]) html += `<option ${A.targets[ax].includes(it.name) ? 'selected' : ''}>${esc(it.name)}</option>`;
+      html += `</select>`;
+    }
+    html += `<div class="row"><button type="button" data-fit="${a}">Fit to targets</button></div></details>`;
+    div.innerHTML = html; altsForm.appendChild(div);
+  }
+}
+altsForm.addEventListener('input', e => {
+  const t = e.target, a = +t.dataset.a; if (Number.isNaN(a)) return;
+  const A = state.alts[a]; A.empty = false;
+  if (t.dataset.f) { A[t.dataset.f] = t.value; updateNames(); return; }
+  if (t.dataset.tax) { A.targets[t.dataset.tax] = [...t.selectedOptions].map(o => o.value); return; }
+  if (t.dataset.ax) validateAltInputs();
+});
+altsForm.addEventListener('click', e => {
+  const a = e.target.dataset.fit; if (a === undefined) return;
+  const A = state.alts[+a];
+  for (const ax of AXES) {
+    const its = cuts(state.axes[ax]).filter(i => A.targets[ax].includes(i.name));
+    if (its.length) A.box[ax] = [Math.min(...its.map(i => i.min)), Math.max(...its.map(i => i.max))];
+  }
+  A.empty = false; renderAltsForm(); altsForm.querySelectorAll('.alt')[+a].querySelector('details').open = true;
+});
+function validateAltInputs() {
+  const errs = [];
+  altsForm.querySelectorAll('input[data-ax]').forEach(inp => inp.classList.remove('bad'));
+  for (let a = 0; a < 3; a++) for (const ax of AXES) {
+    const lo = altsForm.querySelector(`input[data-a="${a}"][data-ax="${ax}"][data-i="0"]`), hi = altsForm.querySelector(`input[data-a="${a}"][data-ax="${ax}"][data-i="1"]`);
+    const vlo = Number(lo.value), vhi = Number(hi.value), name = state.alts[a].code;
+    let bad = false;
+    for (const [inp, v] of [[lo, vlo], [hi, vhi]]) if (inp.value === '' || !Number.isFinite(v) || v < 0 || v > 1) { inp.classList.add('bad'); bad = true; }
+    if (bad) { errs.push(`${name} ${ax}: bounds must be numbers from 0 to 1.`); continue; }
+    if (!(vhi > vlo)) { lo.classList.add('bad'); hi.classList.add('bad'); errs.push(`${name} ${ax}: min must be smaller than max.`); continue; }
+    state.alts[a].box[ax] = [vlo, vhi];
+  }
+  return errs;
+}
+
+// ---------------- three.js scene ----------------
+const wrap = document.getElementById('canvasWrap');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+wrap.appendChild(renderer.domElement);
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.style.position = 'absolute'; labelRenderer.domElement.style.top = '0'; labelRenderer.domElement.style.pointerEvents = 'none';
+wrap.appendChild(labelRenderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+const HOME = new THREE.Vector3(9.5, 6.5, 9.5);
+camera.position.copy(HOME);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.target.set(0, 0, 0);
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(5, 10, 7); scene.add(dl);
+
+// SES (x, y, z in 0..1)  ->  three (x right, z_SES up, y_SES into the screen)
+const P = (x, y, z) => new THREE.Vector3(-HALF + SIDE * x, -HALF + SIDE * z, HALF - SIDE * y);
+function boxFrom(b) { // b: {X:[a,b],Y:[],Z:[]}
+  const sx = (b.X[1] - b.X[0]) * SIDE, sy = (b.Z[1] - b.Z[0]) * SIDE, sz = (b.Y[1] - b.Y[0]) * SIDE;
+  const c = P((b.X[0] + b.X[1]) / 2, (b.Y[0] + b.Y[1]) / 2, (b.Z[0] + b.Z[1]) / 2);
+  return { size: [Math.max(sx, 1e-4), Math.max(sy, 1e-4), Math.max(sz, 1e-4)], center: c };
+}
+const groups = { grid: new THREE.Group(), outer: new THREE.Group(), axes: new THREE.Group(), labels: new THREE.Group(), cubes: [0, 1, 2].map(() => new THREE.Group()), ints: new THREE.Group(), sel: new THREE.Group() };
+Object.values(groups).flat().forEach(g => scene.add(g));
+function clearGroup(g) { while (g.children.length) { const o = g.children.pop(); o.traverse(n => { n.geometry?.dispose?.(); if (n.material) [].concat(n.material).forEach(m => m.dispose()); if (n.element) n.element.remove(); }); } }
+function cssColor(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function label(text, pos, cls) { const d = document.createElement('div'); d.className = 'lbl ' + (cls || ''); d.textContent = text; const o = new CSS2DObject(d); o.position.copy(pos); return o; }
+
+let gridMesh = null, gridCells = [];
+function buildOuter() {
+  clearGroup(groups.outer);
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(SIDE, SIDE, SIDE)), new THREE.LineBasicMaterial({ color: cssColor('--muted') }));
+  groups.outer.add(e);
+}
+function buildAxes() {
+  clearGroup(groups.axes); clearGroup(groups.labels);
+  const ink = cssColor('--ink');
+  const o = P(0, 0, 0);
+  const ends = { X: P(1.12, 0, 0), Y: P(0, 1.12, 0), Z: P(0, 0, 1.12) };
+  for (const ax of AXES) {
+    const g = new THREE.BufferGeometry().setFromPoints([o, ends[ax]]);
+    groups.axes.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: ink })));
+    const dir = ends[ax].clone().sub(o).normalize();
+    groups.axes.add(new THREE.ArrowHelper(dir, ends[ax].clone().sub(dir.clone().multiplyScalar(0.25)), 0.25, ink, 0.18, 0.1));
+    groups.axes.add(label(AXIS_NAME[ax], ends[ax].clone().add(dir.clone().multiplyScalar(0.25)), 'axis'));
+    // ticks at category cut points (labelled) and item cut points (small marks)
+    const tickPts = [];
+    const off = ax === 'Z' ? new THREE.Vector3(-0.12, 0, 0.12) : new THREE.Vector3(0, -0.12, 0);
+    for (const it of cuts(state.axes[ax])) {
+      const a = ax === 'X' ? P(it.max, 0, 0) : ax === 'Y' ? P(0, it.max, 0) : P(0, 0, it.max);
+      tickPts.push(a, a.clone().add(off.clone().multiplyScalar(0.4)));
+    }
+    groups.axes.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(tickPts), new THREE.LineBasicMaterial({ color: cssColor('--muted') })));
+    const cc = catCuts(state.axes[ax]);
+    const t0 = ax === 'X' ? P(0, 0, 0) : ax === 'Y' ? P(0, 0, 0) : P(0, 0, 0);
+    groups.axes.add(label('0', t0.clone().add(off.clone().multiplyScalar(2)), 'cat'));
+    for (const c of cc) {
+      const pMax = ax === 'X' ? P(c.max, 0, 0) : ax === 'Y' ? P(0, c.max, 0) : P(0, 0, c.max);
+      const pMid = ax === 'X' ? P((c.min + c.max) / 2, 0, 0) : ax === 'Y' ? P(0, (c.min + c.max) / 2, 0) : P(0, 0, (c.min + c.max) / 2);
+      groups.axes.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([pMax, pMax.clone().add(off)]), new THREE.LineBasicMaterial({ color: ink })));
+      if (c.share > 0.035) groups.labels.add(label(c.max.toFixed(2), pMax.clone().add(off.clone().multiplyScalar(2)), 'cat'));
+      if (c.share > 0.05) groups.labels.add(label(c.cat, pMid.clone().add(off.clone().multiplyScalar(4.2)), 'cat'));
+    }
+  }
+}
+function buildGrid() {
+  clearGroup(groups.grid); gridMesh = null; gridCells = [];
+  const level = document.getElementById('gridLevel').value;
+  const seg = ax => level === 'cat' ? catCuts(state.axes[ax]).map(c => ({ name: c.cat, cat: c.cat, min: c.min, max: c.max }))
+                                    : cuts(state.axes[ax]).map(i => ({ name: i.name, cat: i.cat, min: i.min, max: i.max }));
+  const SX = seg('X'), SY = seg('Y'), SZ = seg('Z');
+  for (const x of SX) for (const y of SY) for (const z of SZ) gridCells.push({ X: x, Y: y, Z: z, box: { X: [x.min, x.max], Y: [y.min, y.max], Z: [z.min, z.max] } });
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({ color: cssColor('--muted'), transparent: true, opacity: 0.035, depthWrite: false });
+  gridMesh = new THREE.InstancedMesh(geo, mat, gridCells.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+  const edges = [];
+  const E = [[0,0,0,1,0,0],[0,1,0,1,1,0],[0,0,1,1,0,1],[0,1,1,1,1,1],[0,0,0,0,1,0],[1,0,0,1,1,0],[0,0,1,0,1,1],[1,0,1,1,1,1],[0,0,0,0,0,1],[1,0,0,1,0,1],[0,1,0,0,1,1],[1,1,0,1,1,1]];
+  gridCells.forEach((c, i) => {
+    const b = boxFrom(c.box);
+    m.compose(b.center, q, new THREE.Vector3(...b.size)); gridMesh.setMatrixAt(i, m);
+  });
+  // cut-plane lines (one set for the whole grid: cheaper than per-cell edges, same picture)
+  const xs = [...new Set(SX.flatMap(s => [s.min, s.max]))], ys = [...new Set(SY.flatMap(s => [s.min, s.max]))], zs = [...new Set(SZ.flatMap(s => [s.min, s.max]))];
+  for (const x of xs) for (const y of ys) edges.push(P(x, y, 0), P(x, y, 1));
+  for (const x of xs) for (const z of zs) edges.push(P(x, 0, z), P(x, 1, z));
+  for (const y of ys) for (const z of zs) edges.push(P(0, y, z), P(1, y, z));
+  gridMesh.renderOrder = 0;
+  groups.grid.add(gridMesh);
+  const lm = new THREE.LineBasicMaterial({ color: cssColor('--muted'), transparent: true, opacity: level === 'cat' ? 0.28 : 0.1, depthWrite: false });
+  groups.grid.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(edges), lm));
+}
+function intersect(a, b) {
+  const r = {};
+  for (const ax of AXES) { const lo = Math.max(a.box[ax][0], b.box[ax][0]), hi = Math.min(a.box[ax][1], b.box[ax][1]); if (!(hi > lo)) return null; r[ax] = [lo, hi]; }
+  return r;
+}
+const vol = b => AXES.reduce((p, ax) => p * (b[ax][1] - b[ax][0]), 1);
+let pairs = [];
+function buildCubes() {
+  groups.cubes.forEach(clearGroup); clearGroup(groups.ints);
+  state.alts.slice(0, 3).forEach((A, i) => {
+    if (A.empty) return;
+    const b = boxFrom(A.box), col = new THREE.Color(ALT_COLORS[i]);
+    const geo = new THREE.BoxGeometry(...b.size);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.position.copy(b.center); mesh.renderOrder = 2 + i; mesh.userData = { kind: 'alt', i };
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: col }));
+    edge.position.copy(b.center); edge.renderOrder = 6;
+    groups.cubes[i].add(mesh, edge);
+    groups.cubes[i].add(label(A.code, b.center.clone().add(new THREE.Vector3(b.size[0] / 2, b.size[1] / 2, b.size[2] / 2)), 'axis'));
+  });
+  pairs = [];
+  const act = state.alts.slice(0, 3).map((A, i) => ({ A, i })).filter(o => !o.A.empty);
+  for (let p = 0; p < act.length; p++) for (let q = p + 1; q < act.length; q++) {
+    const r = intersect(act[p].A, act[q].A);
+    pairs.push({ i: act[p].i, j: act[q].i, box: r });
+    if (r) {
+      const b = boxFrom(r), geo = new THREE.BoxGeometry(...b.size);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: INT_COLOR, transparent: true, opacity: 0.35, depthWrite: false }));
+      mesh.position.copy(b.center); mesh.renderOrder = 8; mesh.userData = { kind: 'int', i: act[p].i, j: act[q].i, box: r };
+      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineDashedMaterial({ color: INT_COLOR, dashSize: 0.08, gapSize: 0.05 }));
+      edge.computeLineDistances(); edge.position.copy(b.center); edge.renderOrder = 9;
+      groups.ints.add(mesh, edge);
+    }
+  }
+  renderOverlaps(); updateNames(); applyToggles();
+}
+function fmt(v) { return v.toFixed(4); }
+function boxHTML(b) {
+  return `<div class="kv mono">${AXES.map(ax => `<b>${ax}</b><span>[${fmt(b[ax][0])}, ${fmt(b[ax][1])}] side ${fmt(b[ax][1] - b[ax][0])}</span>`).join('')}
+    <b>Volume</b><span>${(vol(b) * 100).toFixed(3)}% of the unit cube</span></div>`;
+}
+function renderOverlaps() {
+  const el = document.getElementById('overlaps');
+  if (!pairs.length) { el.textContent = 'Fewer than two alternatives.'; return; }
+  el.innerHTML = pairs.map(p => {
+    const a = state.alts[p.i], b = state.alts[p.j];
+    return `<div style="margin:6px 0"><b>${esc(a.code)} ∩ ${esc(b.code)}</b>${p.box ? boxHTML(p.box) : '<div>No overlap: the boxes are disjoint on at least one axis.</div>'}</div>`;
+  }).join('');
+}
+function updateNames() { for (let i = 0; i < 3; i++) { const A = state.alts[i]; document.getElementById('n' + i).innerHTML = A && !A.empty ? `<span style="color:${ALT_COLORS[i]}">■</span> ${esc(A.code)}: ${esc(A.label)}` : `Cube ${i + 1} (empty)`; } }
+
+// selection
+const selMat = new THREE.LineBasicMaterial({ color: cssColor('--accent') });
+function showSel(box) { clearGroup(groups.sel); if (!box) return; const b = boxFrom(box); const e = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(...b.size)), selMat); e.position.copy(b.center); e.renderOrder = 10; groups.sel.add(e); }
+function describe(hit) {
+  if (!hit) return null;
+  if (hit.kind === 'alt') {
+    const A = state.alts[hit.i];
+    const sc = ['X', 'Y', 'Z', 'L'].filter(k => A.scores[k] !== undefined).map(k => `<b>${k}</b><span>${Number(A.scores[k]).toFixed(4)}</span>`).join('');
+    return { title: `${A.code}: ${A.label}`, html: boxHTML(A.box) + (sc ? `<div style="margin-top:4px">Criteria</div><div class="kv mono">${sc}</div>` : '') +
+      AXES.map(ax => A.targets[ax].length ? `<div style="margin-top:4px"><b>${ax} targets:</b> ${A.targets[ax].map(esc).join('; ')}</div>` : '').join(''), box: A.box };
+  }
+  if (hit.kind === 'int') return { title: `Overlap ${state.alts[hit.i].code} ∩ ${state.alts[hit.j].code}`, html: boxHTML(hit.box), box: hit.box };
+  if (hit.kind === 'cell') {
+    const c = gridCells[hit.id];
+    return { title: 'Grid cell', html: `<div><b>X</b> ${esc(c.X.name)}${c.X.name !== c.X.cat ? ' (' + esc(c.X.cat) + ')' : ''}</div><div><b>Y</b> ${esc(c.Y.name)}${c.Y.name !== c.Y.cat ? ' (' + esc(c.Y.cat) + ')' : ''}</div><div><b>Z</b> ${esc(c.Z.name)}${c.Z.name !== c.Z.cat ? ' (' + esc(c.Z.cat) + ')' : ''}</div>` + boxHTML(c.box), box: c.box };
+  }
+}
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), tip = document.getElementById('tooltip'), insp = document.getElementById('inspector');
+let pinned = null;
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const objs = [];
+  groups.ints.children.forEach(o => o.isMesh && groups.ints.visible && objs.push(o));
+  groups.cubes.forEach(g => g.visible && g.children.forEach(o => o.isMesh && objs.push(o)));
+  let h = ray.intersectObjects(objs, false)[0];
+  if (h) return h.object.userData;
+  if (gridMesh && groups.grid.visible) { h = ray.intersectObject(gridMesh, false)[0]; if (h) return { kind: 'cell', id: h.instanceId }; }
+  return null;
+}
+renderer.domElement.addEventListener('pointermove', ev => {
+  const d = describe(pick(ev));
+  if (!d) { tip.style.display = 'none'; return; }
+  const r = wrap.getBoundingClientRect();
+  tip.innerHTML = `<b>${esc(d.title)}</b>` + d.html; tip.style.display = 'block';
+  tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 290) + 'px'; tip.style.top = (ev.clientY - r.top + 14) + 'px';
+  if (!pinned) { insp.innerHTML = `<b>${esc(d.title)}</b>` + d.html; showSel(d.box); }
+});
+renderer.domElement.addEventListener('pointerleave', () => { tip.style.display = 'none'; });
+let down = null;
+renderer.domElement.addEventListener('pointerdown', ev => { down = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('click', ev => {
+  if (down && Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) { down = null; return; } // a drag, not a click
+  down = null;
+  const h = pick(ev), d = describe(h);
+  pinned = d ? h : null;
+  insp.innerHTML = d ? `<b>📌 ${esc(d.title)}</b>` + d.html : 'Nothing selected.'; showSel(d ? d.box : null);
+});
+
+// toggles
+function applyToggles() {
+  groups.grid.visible = document.getElementById('tGrid').checked;
+  groups.outer.visible = document.getElementById('tOuter').checked;
+  [0, 1, 2].forEach(i => groups.cubes[i].visible = document.getElementById('tC' + i).checked);
+  groups.ints.visible = document.getElementById('tInt').checked;
+  groups.labels.visible = document.getElementById('tLbl').checked;
+  groups.labels.children.forEach(l => l.element.style.display = groups.labels.visible ? '' : 'none');
+  groups.cubes.forEach(g => g.children.forEach(o => { if (o.element) o.element.style.display = g.visible ? '' : 'none'; }));
+}
+['tGrid', 'tOuter', 'tC0', 'tC1', 'tC2', 'tInt', 'tLbl'].forEach(id => document.getElementById(id).addEventListener('change', applyToggles));
+document.getElementById('gridLevel').addEventListener('change', () => { buildGrid(); applyToggles(); fillFinder(); });
+document.getElementById('resetCam').addEventListener('click', () => { camera.position.copy(HOME); controls.target.set(0, 0, 0); controls.update(); });
+
+// cell finder
+function fillFinder() {
+  const level = document.getElementById('gridLevel').value;
+  for (const ax of AXES) {
+    const s = document.getElementById('f' + ax);
+    const list = level === 'cat' ? catCuts(state.axes[ax]).map(c => c.cat) : cuts(state.axes[ax]).map(i => i.name);
+    s.innerHTML = list.map((n, k) => `<option value="${k}">${ax}: ${esc(n)}</option>`).join('');
+  }
+}
+document.getElementById('findCell').addEventListener('click', () => {
+  const level = document.getElementById('gridLevel').value;
+  const n = ax => (level === 'cat' ? catCuts(state.axes[ax]) : state.axes[ax]).length;
+  const id = (+fX.value) * n('Y') * n('Z') + (+fY.value) * n('Z') + (+fZ.value);
+  const d = describe({ kind: 'cell', id }); pinned = { kind: 'cell', id };
+  insp.innerHTML = `<b>📌 ${esc(d.title)}</b>` + d.html; showSel(d.box);
+});
+
+// ---------------- apply / load ----------------
+function rebuild() { buildOuter(); buildAxes(); buildGrid(); buildCubes(); fillFinder(); pinned = null; showSel(null); insp.textContent = 'Nothing selected.'; }
+function loadState(s, source) {
+  state = s; state.alts.forEach(a => a.empty = false);
+  renderAxesForm(); renderAltsForm(); rebuild();
+  say([`Loaded ${source}: ${state.axes.X.length} stakeholder groups, ${state.axes.Y.length} beneficiaries, ${state.axes.Z.length} attributes, ${state.alts.length} alternatives.`], 'ok');
+}
+function loadCSVText(text, source) {
+  clearMsgs();
+  const r = stateFromCSV(text);
+  if (r.errors && r.errors.length) { say(['The CSV was not loaded. Fix these values and upload it again:'], 'err'); say(r.errors.slice(0, 12), 'err'); return; }
+  if (r.warnings?.length) say(r.warnings, 'err');
+  loadState(r.state, source);
+}
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader(); rd.onload = () => loadCSVText(rd.result, f.name); rd.readAsText(f); e.target.value = '';
+});
+document.getElementById('loadExample').addEventListener('click', () => loadCSVText(document.getElementById('sampleCsv').textContent.trim(), 'Tillamook example'));
+document.getElementById('apply').addEventListener('click', () => {
+  clearMsgs();
+  const errs = [];
+  for (const ax of AXES) {
+    if (!state.axes[ax].length) errs.push(`The ${ax} axis has no items.`);
+    state.axes[ax].forEach(it => { if (!Number.isFinite(Number(it.value)) || it.value < 0) errs.push(`${ax}: result of "${it.name}" must be 0 or more.`); });
+    if (axesForm.querySelector(`input.bad[data-ax="${ax}"]`)) errs.push(`${ax}: fix the red result cells.`);
+    if (state.axes[ax].reduce((t, i) => t + Number(i.value), 0) <= 0) errs.push(`${ax}: the results must not all be 0.`);
+  }
+  errs.push(...validateAltInputs());
+  if (errs.length) { say(['Not applied:'], 'err'); say(errs, 'err'); return; }
+  renderAxesForm(); rebuild(); say(['Applied.'], 'ok');
+});
+function download(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+document.getElementById('dlCsv').addEventListener('click', () => download('3d_ses.csv', stateToCSV({ ...state, alts: state.alts.filter(a => !a.empty) })));
+document.getElementById('dlTpl').addEventListener('click', () => download('3d_ses_template.csv',
+  'record,axis,group,name,value,min,max,label\naxis,X,Tier 1,Stakeholder group 1,80,,,\naxis,X,Tier 1,Stakeholder group 2,60,,,\naxis,Y,Non-Use,People Who Care,20,,,\naxis,Y,Learning,Researchers,10,,,\naxis,Z,Water,Water Quality,30,,,\naxis,Z,Fauna,Edible Fauna,10,,,\nalt,X,A1,Stakeholder group 1,,0,0.57,Alternative 1\nalt,Y,A1,People Who Care,,0,0.67,Alternative 1\nalt,Z,A1,Water Quality,,0,0.75,Alternative 1\n'));
+
+// ---------------- resize / loop ----------------
+function resize() {
+  const w = wrap.clientWidth, h = wrap.clientHeight || 400;
+  renderer.setSize(w, h); labelRenderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(wrap);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => rebuild());
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
+resize();
+loadCSVText(document.getElementById('sampleCsv').textContent.trim(), 'Tillamook example');
+window.__ses = { get state() { return state; }, pairs: () => pairs, cells: () => gridCells.length, loadCSVText };
+</script>
+</body>
+</html>
